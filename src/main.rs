@@ -10,6 +10,7 @@ mod help;
 mod table;
 mod task_report;
 mod util;
+mod keyconfig;
 
 use crate::util::{destruct_terminal, setup_terminal, Event, EventConfig, Events};
 use clap::{App, Arg};

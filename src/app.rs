@@ -4,8 +4,7 @@ use crate::context::Context;
 use crate::help::Help;
 use crate::table::{Row, Table, TableState};
 use crate::task_report::TaskReportTable;
-use crate::util::{Events, Event};
-use crate::util::Key;
+use crate::util::{Key, Events, Event};
 
 use std::cmp::Ordering;
 use std::convert::TryInto;
