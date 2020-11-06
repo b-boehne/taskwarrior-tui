@@ -119,6 +119,7 @@ pub enum AppMode {
     TaskHelpPopup,
     TaskError,
     TaskContextMenu,
+    TaskDeletePrompt,
     Calendar,
 }
 
@@ -128,6 +129,7 @@ pub struct TTApp {
     pub context_table_state: TableState,
     pub current_context_filter: String,
     pub current_context: String,
+    pub delete: LineBuffer,
     pub command: LineBuffer,
     pub filter: LineBuffer,
     pub modify: LineBuffer,
@@ -141,6 +143,8 @@ pub struct TTApp {
     pub task_report_height: u16,
     pub help_popup: Help,
     pub contexts: Vec<Context>,
+    pub terminal_width: u16,
+    pub terminal_height: u16,
 }
 
 impl TTApp {
@@ -153,6 +157,7 @@ impl TTApp {
             tasks: Arc::new(Mutex::new(vec![])),
             current_context_filter: "".to_string(),
             current_context: "".to_string(),
+            delete: LineBuffer::with_capacity(MAX_LINE),
             command: LineBuffer::with_capacity(MAX_LINE),
             filter: LineBuffer::with_capacity(MAX_LINE),
             modify: LineBuffer::with_capacity(MAX_LINE),
@@ -165,6 +170,8 @@ impl TTApp {
             calendar_year: Local::today().year(),
             help_popup: Help::new(),
             contexts: vec![],
+            terminal_width: 0,
+            terminal_height: 0,
         };
         for c in "status:pending ".chars() {
             app.filter.insert(c, 1);
@@ -189,12 +196,16 @@ impl TTApp {
     }
 
     pub fn draw(&mut self, f: &mut Frame<impl Backend>) {
+        let r = f.size();
+        self.terminal_width = r.width;
+        self.terminal_height = r.height;
         match self.mode {
             AppMode::TaskReport
             | AppMode::TaskFilter
             | AppMode::TaskAdd
             | AppMode::TaskAnnotate
             | AppMode::TaskContextMenu
+            | AppMode::TaskDeletePrompt
             | AppMode::TaskError
             | AppMode::TaskHelpPopup
             | AppMode::TaskSubprocess
@@ -364,6 +375,16 @@ impl TTApp {
             AppMode::TaskContextMenu => {
                 self.draw_command(f, rects[1], self.filter.as_str(), "Filter Tasks");
                 self.draw_context_menu(f);
+            }
+            AppMode::TaskDeletePrompt => {
+                f.set_cursor(rects[1].x + self.delete.pos() as u16 + 1, rects[1].y + 1);
+                f.render_widget(Clear, rects[1]);
+                self.draw_command(
+                    f,
+                    rects[1],
+                    self.delete.as_str(),
+                    Span::styled("Delete Task?", Style::default().add_modifier(Modifier::BOLD)),
+                );
             }
             _ => {
                 panic!("Reached unreachable code. Something went wrong");
@@ -1272,20 +1293,27 @@ impl TTApp {
                 Key::Up | Key::Char('k') => self.task_report_previous(),
                 Key::PageDown | Key::Char('J') => self.task_report_next_page(),
                 Key::PageUp | Key::Char('K') => self.task_report_previous_page(),
-                Key::Char('d') => match self.task_done() {
+                Key::Char('x') => match self.task_done() {
                     Ok(_) => self.update()?,
                     Err(e) => {
                         self.mode = AppMode::TaskError;
                         self.error = e;
                     }
                 },
-                Key::Char('x') => match self.task_delete() {
-                    Ok(_) => self.update()?,
-                    Err(e) => {
-                        self.mode = AppMode::TaskError;
-                        self.error = e;
+                Key::Char('d') => {
+                    self.mode = AppMode::TaskDeletePrompt;
+                    match self.task_current() {
+                        Some(t) => {
+                            let s = format!(
+                                "Delete task {} - '{}' ? Hit `d` again or `Enter` to confirm. Hit `Esc` to cancel.",
+                                t.id().unwrap_or_default(),
+                                t.description()
+                            );
+                            self.delete.update(&s, s.len())
+                        },
+                        None => self.mode = AppMode::TaskReport,
                     }
-                },
+                }
                 Key::Char('s') => match self.task_start_or_stop() {
                     Ok(_) => self.update()?,
                     Err(e) => {
@@ -1470,6 +1498,23 @@ impl TTApp {
                     self.update()?;
                 }
                 _ => handle_movement(&mut self.filter, input),
+            },
+            AppMode::TaskDeletePrompt => match input {
+                Key::Char('d') | Key::Char('\n') => match self.task_delete() {
+                    Ok(_) => {
+                        self.mode = AppMode::TaskReport;
+                        self.update()?;
+                    }
+                    Err(e) => {
+                        self.mode = AppMode::TaskError;
+                        self.error = e;
+                    }
+                },
+                Key::Esc => {
+                    self.delete.update("", 0);
+                    self.mode = AppMode::TaskReport;
+                }
+                _ => handle_movement(&mut self.command, input),
             },
             AppMode::TaskError => self.mode = AppMode::TaskReport,
             AppMode::Calendar => match input {
