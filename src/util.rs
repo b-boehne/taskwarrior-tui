@@ -9,7 +9,7 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::{sync::mpsc, thread, time::Duration};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Key {
     Backspace,
     Left,

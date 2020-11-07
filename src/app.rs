@@ -2,6 +2,7 @@ use crate::calendar::Calendar;
 use crate::config::Config;
 use crate::context::Context;
 use crate::help::Help;
+use crate::keyconfig::KeyConfig;
 use crate::table::{Row, Table, TableState};
 use crate::task_report::TaskReportTable;
 use crate::util::{Key, Events, Event};
@@ -144,6 +145,7 @@ pub struct TTApp {
     pub contexts: Vec<Context>,
     pub terminal_width: u16,
     pub terminal_height: u16,
+    pub key_config: KeyConfig,
 }
 
 impl TTApp {
@@ -171,6 +173,7 @@ impl TTApp {
             contexts: vec![],
             terminal_width: 0,
             terminal_height: 0,
+            key_config: KeyConfig::default(),
         };
         for c in "status:pending ".chars() {
             app.filter.insert(c, 1);
@@ -1278,28 +1281,34 @@ impl TTApp {
         events: &Events,
     ) -> Result<(), Box<dyn Error>> {
         events.pause_ticker();
+
         match self.mode {
-            AppMode::TaskReport => match input {
-                Key::Ctrl('c') | Key::Char('q') => self.should_quit = true,
-                Key::Char('r') => self.update()?,
-                Key::End | Key::Char('G') => self.task_report_bottom(),
-                Key::Home => self.task_report_top(),
-                Key::Char('g') => match events.next()? {
-                    Event::Input(Key::Char('g')) => self.task_report_top(),
-                    _ => (),
-                }
-                Key::Down | Key::Char('j') => self.task_report_next(),
-                Key::Up | Key::Char('k') => self.task_report_previous(),
-                Key::PageDown | Key::Char('J') => self.task_report_next_page(),
-                Key::PageUp | Key::Char('K') => self.task_report_previous_page(),
-                Key::Char('x') => match self.task_done() {
-                    Ok(_) => self.update()?,
-                    Err(e) => {
-                        self.mode = AppMode::TaskError;
-                        self.error = e;
+            AppMode::TaskReport => {
+                if input == self.key_config.exit_popup || input == self.key_config.exit || input == Key::Ctrl('c') {
+                    self.should_quit = true;
+                } else if input == self.key_config.refresh {
+                    self.update()?;
+                } else if input == self.key_config.end {
+                    self.task_report_bottom();
+                } else if input == self.key_config.home {
+                    self.task_report_top();
+                } else if input == self.key_config.move_down {
+                    self.task_report_next();
+                } else if input == self.key_config.move_up {
+                    self.task_report_previous();
+                } else if input == Key::PageDown || input == self.key_config.move_down_page {
+                    self.task_report_next_page();
+                } else if input == Key::PageUp || input == self.key_config.move_up_page {
+                    self.task_report_previous_page();
+                } else if input == self.key_config.done_task {
+                    match self.task_done() {
+                        Ok(_) => self.update()?,
+                        Err(e) => {
+                            self.mode = AppMode::TaskError;
+                            self.error = e;
+                        }
                     }
-                },
-                Key::Char('d') => {
+                } else if input == self.key_config.delete_task {
                     self.mode = AppMode::TaskDeletePrompt;
                     match self.task_current() {
                         Some(t) => {
@@ -1312,22 +1321,23 @@ impl TTApp {
                         },
                         None => self.mode = AppMode::TaskReport,
                     }
-                }
-                Key::Char('s') => match self.task_start_or_stop() {
-                    Ok(_) => self.update()?,
-                    Err(e) => {
-                        self.mode = AppMode::TaskError;
-                        self.error = e;
+                } else if input == self.key_config.start_stop_toggle_task {
+                    match self.task_start_or_stop() {
+                        Ok(_) => self.update()?,
+                        Err(e) => {
+                            self.mode = AppMode::TaskError;
+                            self.error = e;
+                        }
                     }
-                },
-                Key::Char('u') => match self.task_undo() {
-                    Ok(_) => self.update()?,
-                    Err(e) => {
-                        self.mode = AppMode::TaskError;
-                        self.error = e;
+                } else if input == self.key_config.undo_task {
+                    match self.task_undo() {
+                        Ok(_) => self.update()?,
+                        Err(e) => {
+                            self.mode = AppMode::TaskError;
+                            self.error = e;
+                        }
                     }
-                },
-                Key::Char('e') => {
+                } else if input == self.key_config.edit_task {
                     events.pause_key_capture(terminal);
                     let r = self.task_edit();
                     events.resume_key_capture(terminal);
@@ -1338,8 +1348,7 @@ impl TTApp {
                             self.error = e;
                         }
                     }
-                }
-                Key::Char('m') => {
+                } else if input == self.key_config.modify_task {
                     self.mode = AppMode::TaskModify;
                     match self.task_current() {
                         Some(t) => {
@@ -1348,192 +1357,192 @@ impl TTApp {
                         }
                         None => self.modify.update("", 0),
                     }
-                }
-                Key::Char('!') => {
+                } else if input == self.key_config.shell_command {
                     self.mode = AppMode::TaskSubprocess;
-                }
-                Key::Char('l') => {
+                } else if input == self.key_config.log_task {
                     self.mode = AppMode::TaskLog;
-                }
-                Key::Char('a') => {
+                } else if input == self.key_config.add_task {
                     self.mode = AppMode::TaskAdd;
-                }
-                Key::Char('A') => {
+                } else if input == self.key_config.annotate_task {
                     self.mode = AppMode::TaskAnnotate;
-                }
-                Key::Char('?') => {
+                } else if input == self.key_config.help_menu {
                     self.mode = AppMode::TaskHelpPopup;
-                }
-                Key::Char('/') => {
+                } else if input == self.key_config.filter_tasks {
                     self.mode = AppMode::TaskFilter;
-                }
-                Key::Char('z') => {
+                } else if input == self.key_config.toggle_task_info {
                     self.task_report_show_info = !self.task_report_show_info;
-                }
-                Key::Char('c') => {
+                } else if input == self.key_config.context_switcher_menu {
                     self.mode = AppMode::TaskContextMenu;
-                }
-                Key::Char(']') => {
+                } else if input == self.key_config.next_view {
                     self.mode = AppMode::Calendar;
                 }
-                _ => {}
             },
-            AppMode::TaskContextMenu => match input {
-                Key::Esc | Key::Char('q') => {
+            AppMode::TaskContextMenu => {
+                if input == self.key_config.exit_popup {
                     self.mode = AppMode::TaskReport;
-                },
-                Key::Down | Key::Char('j') => self.context_next(),
-                Key::Up | Key::Char('k') => self.context_previous(),
-                Key::Char('\n') => {
+                } else if input == self.key_config.move_down || input == Key::Down {
+                    self.context_next();
+                } else if input == self.key_config.move_up || input == Key::Up {
+                    self.context_previous();
+                } else if input == self.key_config.confirm {
                     self.context_select();
                     self.get_context()?;
                 }
-                _ => {}
             },
-            AppMode::TaskHelpPopup => match input {
-                Key::Esc | Key::Char('q') => {
+            AppMode::TaskHelpPopup => {
+                if input == self.key_config.exit_popup {
                     self.mode = AppMode::TaskReport;
-                }
-                Key::Char('j') => {
+                } else if input == self.key_config.move_down || input == Key::Down {
                     self.help_popup.scroll = self.help_popup.scroll.checked_add(1).unwrap_or(0);
                     let th = (self.help_popup.text_height as u16).checked_sub(1).unwrap_or(0);
                     if self.help_popup.scroll > th {
                         self.help_popup.scroll = th
                     }
-                }
-                Key::Char('k') => {
+                } else if input == self.key_config.move_up || input == Key::Up {
                     self.help_popup.scroll = self.help_popup.scroll.checked_sub(1).unwrap_or(0);
                 }
-                _ => {}
             },
-            AppMode::TaskModify => match input {
-                Key::Char('\n') => match self.task_modify() {
-                    Ok(_) => {
-                        self.mode = AppMode::TaskReport;
-                        self.update()?;
-                    }
-                    Err(e) => {
-                        self.mode = AppMode::TaskError;
-                        self.error = e;
-                    }
-                },
-                Key::Esc => {
+            AppMode::TaskModify => {
+                if input == self.key_config.confirm {
+                    match self.task_modify() {
+                        Ok(_) => {
+                            self.mode = AppMode::TaskReport;
+                            self.update()?;
+                        }
+                        Err(e) => {
+                            self.mode = AppMode::TaskError;
+                            self.error = e;
+                        }
+                    };
+                } else if input == self.key_config.exit_popup {
                     self.modify.update("", 0);
                     self.mode = AppMode::TaskReport;
+                } else {
+                    handle_movement(&mut self.modify, input);
                 }
-                _ => handle_movement(&mut self.modify, input),
             },
-            AppMode::TaskSubprocess => match input {
-                Key::Char('\n') => match self.task_subprocess() {
-                    Ok(_) => {
-                        self.mode = AppMode::TaskReport;
-                        self.update()?;
+            AppMode::TaskSubprocess => {
+                if input == self.key_config.confirm {
+                    match self.task_subprocess() {
+                        Ok(_) => {
+                            self.mode = AppMode::TaskReport;
+                            self.update()?;
+                        }
+                        Err(e) => {
+                            self.mode = AppMode::TaskError;
+                            self.error = e;
+                        }
                     }
-                    Err(e) => {
-                        self.mode = AppMode::TaskError;
-                        self.error = e;
-                    }
-                },
-                Key::Esc => {
+                } else if input == self.key_config.exit_popup {
                     self.command.update("", 0);
                     self.mode = AppMode::TaskReport;
+                } else {
+                    handle_movement(&mut self.command, input);
                 }
-                _ => handle_movement(&mut self.command, input),
             },
-            AppMode::TaskLog => match input {
-                Key::Char('\n') => match self.task_log() {
-                    Ok(_) => {
-                        self.mode = AppMode::TaskReport;
-                        self.update()?;
+            AppMode::TaskLog => {
+                if input == self.key_config.confirm {
+                    match self.task_log() {
+                        Ok(_) => {
+                            self.mode = AppMode::TaskReport;
+                            self.update()?;
+                        }
+                        Err(e) => {
+                            self.mode = AppMode::TaskError;
+                            self.error = e;
+                        }
                     }
-                    Err(e) => {
-                        self.mode = AppMode::TaskError;
-                        self.error = e;
-                    }
-                },
-                Key::Esc => {
+                } else if input == self.key_config.exit_popup {
                     self.command.update("", 0);
                     self.mode = AppMode::TaskReport;
+                } else {
+                    handle_movement(&mut self.command, input);
                 }
-                _ => handle_movement(&mut self.command, input),
             },
-            AppMode::TaskAnnotate => match input {
-                Key::Char('\n') => match self.task_annotate() {
-                    Ok(_) => {
-                        self.mode = AppMode::TaskReport;
-                        self.update()?;
+            AppMode::TaskAnnotate => {
+                if input == self.key_config.confirm {
+                    match self.task_annotate() {
+                        Ok(_) => {
+                            self.mode = AppMode::TaskReport;
+                            self.update()?;
+                        }
+                        Err(e) => {
+                            self.mode = AppMode::TaskError;
+                            self.error = e;
+                        }
                     }
-                    Err(e) => {
-                        self.mode = AppMode::TaskError;
-                        self.error = e;
-                    }
-                },
-                Key::Esc => {
+                } else if input == self.key_config.exit_popup {
                     self.command.update("", 0);
                     self.mode = AppMode::TaskReport;
+                } else {
+                    handle_movement(&mut self.command, input);
                 }
-                _ => handle_movement(&mut self.command, input),
             },
-            AppMode::TaskAdd => match input {
-                Key::Char('\n') => match self.task_add() {
-                    Ok(_) => {
-                        self.mode = AppMode::TaskReport;
-                        self.update()?;
+            AppMode::TaskAdd => {
+                if input == self.key_config.confirm {
+                    match self.task_add() {
+                        Ok(_) => {
+                            self.mode = AppMode::TaskReport;
+                            self.update()?;
+                        }
+                        Err(e) => {
+                            self.mode = AppMode::TaskError;
+                            self.error = e;
+                        }
                     }
-                    Err(e) => {
-                        self.mode = AppMode::TaskError;
-                        self.error = e;
-                    }
-                },
-                Key::Esc => {
+                } else if input == self.key_config.exit_popup {
                     self.command.update("", 0);
                     self.mode = AppMode::TaskReport;
+                } else {
+                    handle_movement(&mut self.command, input);
                 }
-                _ => handle_movement(&mut self.command, input),
             },
-            AppMode::TaskFilter => match input {
-                Key::Char('\n') | Key::Esc => {
+            AppMode::TaskFilter => {
+                if input == self.key_config.confirm || input == self.key_config.exit_popup {
                     self.mode = AppMode::TaskReport;
                     self.update()?;
+                } else {
+                    handle_movement(&mut self.filter, input);
                 }
-                _ => handle_movement(&mut self.filter, input),
             },
-            AppMode::TaskDeletePrompt => match input {
-                Key::Char('d') | Key::Char('\n') => match self.task_delete() {
-                    Ok(_) => {
-                        self.mode = AppMode::TaskReport;
-                        self.update()?;
+            AppMode::TaskDeletePrompt => {
+                if input == self.key_config.delete_task || input == self.key_config.confirm {
+                    match self.task_delete() {
+                        Ok(_) => {
+                            self.mode = AppMode::TaskReport;
+                            self.update()?;
+                        }
+                        Err(e) => {
+                            self.mode = AppMode::TaskError;
+                            self.error = e;
+                        }
                     }
-                    Err(e) => {
-                        self.mode = AppMode::TaskError;
-                        self.error = e;
-                    }
-                },
-                Key::Esc => {
+                } else if input == self.key_config.exit_popup {
                     self.delete.update("", 0);
                     self.mode = AppMode::TaskReport;
+                } else {
+                    handle_movement(&mut self.command, input);
                 }
-                _ => handle_movement(&mut self.command, input),
             },
             AppMode::TaskError => self.mode = AppMode::TaskReport,
-            AppMode::Calendar => match input {
-                Key::Ctrl('c') | Key::Char('q') => self.should_quit = true,
-                Key::Char('[') => {
+            AppMode::Calendar => {
+                if input == self.key_config.exit_popup || input == self.key_config.exit || input == Key::Ctrl('c') {
+                    self.should_quit = true;
+                } else if input == self.key_config.previous_view {
                     self.mode = AppMode::TaskReport;
-                }
-                Key::Up | Key::Char('k') => {
+                } else if input == Key::Up || input == self.key_config.move_up {
                     if self.calendar_year > 0 {
-                        self.calendar_year -= 1
+                        self.calendar_year -= 1;
                     }
-                }
-                Key::Down | Key::Char('j') => self.calendar_year += 1,
-                Key::PageUp | Key::Char('K') => {
+                } else if input == Key::Down || input == self.key_config.move_down {
+                    self.calendar_year += 1;
+                } else if input == Key::PageUp || input == self.key_config.move_up_page {
                     if self.calendar_year > 0 {
-                        self.calendar_year -= 10
+                        self.calendar_year -= 10;
                     }
+                } else if input == Key::PageDown || input == self.key_config.move_down_page {
+                    self.calendar_year += 10;
                 }
-                Key::PageDown | Key::Char('J') => self.calendar_year += 10,
-                _ => {}
             },
         }
         events.resume_ticker();
@@ -1548,9 +1557,6 @@ pub fn handle_movement(linebuffer: &mut LineBuffer, input: Key) {
         }
         Key::Ctrl('b') | Key::Left => {
             linebuffer.move_backward(1);
-        }
-        Key::Char(c) => {
-            linebuffer.insert(c, 1);
         }
         Key::Ctrl('h') | Key::Backspace => {
             linebuffer.backspace(1);
@@ -1584,6 +1590,9 @@ pub fn handle_movement(linebuffer: &mut LineBuffer, input: Key) {
         }
         Key::Alt('t') => {
             linebuffer.transpose_words(1);
+        }
+        Key::Char(c) => {
+            linebuffer.insert(c, 1);
         }
         _ => {}
     }
